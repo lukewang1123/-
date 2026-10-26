@@ -1,0 +1,79 @@
+name: Update injury dashboard and deploy
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: '17 * * * *'
+permissions:
+  contents: read
+concurrency:
+  group: nba-injury-pages
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unpack versioned dashboard source
+        run: unzip -q dashboard-source.zip
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: dashboard/requirements.txt
+      - run: pip install -r dashboard/requirements.txt
+      - run: python -m unittest discover -s dashboard/tests -v
+      - name: Seed persisted snapshot
+        run: |
+          mkdir -p dashboard/site
+          if [ -f snapshot.json ]; then cp snapshot.json dashboard/site/data.json; fi
+      - name: Restore recent snapshot
+        uses: actions/cache/restore@v4
+        with:
+          path: dashboard/site/data.json
+          key: nba-injury-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: nba-injury-
+      - name: Fetch latest Beijing games and injury data
+        run: python dashboard/scripts/update.py
+      - name: Save recent snapshot
+        uses: actions/cache/save@v4
+        with:
+          path: dashboard/site/data.json
+          key: nba-injury-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Persist daily snapshot and keep scheduled updates active
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          today=$(TZ=Asia/Shanghai date +%F)
+          saved=$(cat last-snapshot-date.txt 2>/dev/null || true)
+          if [ "$saved" != "$today" ]; then
+            cp dashboard/site/data.json snapshot.json
+            printf '%s\n' "$today" > last-snapshot-date.txt
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add snapshot.json last-snapshot-date.txt
+            git commit -m "Update daily injury snapshot for $today"
+            git push origin HEAD:main
+          fi
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: dashboard/site
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Publish dashboard
+        id: deployment
+        uses: actions/deploy-pages@v4
