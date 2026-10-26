@@ -18,6 +18,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main
       - name: Unpack versioned dashboard source
         run: unzip -q dashboard-source.zip
       - uses: actions/setup-python@v5
@@ -26,7 +28,7 @@ jobs:
           cache: pip
           cache-dependency-path: dashboard/requirements.txt
       - run: pip install -r dashboard/requirements.txt
-      - run: python -m unittest discover -s dashboard/tests -v
+      - run: env -u GITHUB_STEP_SUMMARY python -m unittest discover -s dashboard/tests -v
       - name: Seed persisted snapshot
         run: |
           mkdir -p dashboard/site
@@ -45,6 +47,7 @@ jobs:
           path: dashboard/site/data.json
           key: nba-injury-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Persist daily snapshot and keep scheduled updates active
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
