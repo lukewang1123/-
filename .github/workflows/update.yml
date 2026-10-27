@@ -4,7 +4,7 @@ on:
     branches: [main]
   workflow_dispatch:
   schedule:
-    - cron: '0 8 * * *' # Beijing 16:00 daily prediction edition
+    - cron: '30 7 * * *' # Beijing 15:30 daily prediction edition
     - cron: '7,22,37,52 * * * *' # injuries; retry unpublished edition after cutoff
 permissions:
   contents: read
