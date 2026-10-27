@@ -4,7 +4,8 @@ on:
     branches: [main]
   workflow_dispatch:
   schedule:
-    - cron: '7,22,37,52 * * * *'
+    - cron: '0 8 * * *' # Beijing 16:00 daily prediction edition
+    - cron: '7,22,37,52 * * * *' # injuries; retry unpublished edition after cutoff
 permissions:
   contents: read
 concurrency:
@@ -44,6 +45,9 @@ jobs:
             dashboard/runtime
           key: nba-reference-v2-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: nba-reference-v2-
+      - name: Restore durable published edition
+        run: |
+          if [ -f published-prediction.json ]; then cp published-prediction.json dashboard/site/predictions.json; fi
       - name: Fetch latest Beijing games and injury data
         env:
           NBA_AVAILABILITY_URL: ${{ vars.NBA_AVAILABILITY_URL }}
@@ -66,13 +70,17 @@ jobs:
           if [ "$saved" != "$today" ]; then
             cp dashboard/site/data.json snapshot.json
             printf '%s\n' "$today" > last-snapshot-date.txt
-            git config user.name 'github-actions[bot]'
-            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            mkdir -p forecast-archive
-            if [ -d dashboard/runtime/forecasts ]; then cp -R dashboard/runtime/forecasts forecast-archive/; fi
-            if [ -d dashboard/runtime/evaluations ]; then cp -R dashboard/runtime/evaluations forecast-archive/; fi
-            git add snapshot.json last-snapshot-date.txt forecast-archive
-            git commit -m "Update daily injury snapshot for $today"
+          fi
+          if [ -f dashboard/site/predictions.json ]; then cp dashboard/site/predictions.json published-prediction.json; fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          mkdir -p forecast-archive
+          if [ -d dashboard/runtime/forecasts ]; then cp -R dashboard/runtime/forecasts forecast-archive/; fi
+          if [ -d dashboard/runtime/evaluations ]; then cp -R dashboard/runtime/evaluations forecast-archive/; fi
+          git add snapshot.json last-snapshot-date.txt forecast-archive
+          if [ -f published-prediction.json ]; then git add published-prediction.json; fi
+          if ! git diff --cached --quiet; then
+            git commit -m "Persist injury snapshot and fixed daily prediction for $today"
             git push origin HEAD:main
           fi
       - uses: actions/upload-artifact@v4
