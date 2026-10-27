@@ -4,7 +4,7 @@ on:
     branches: [main]
   workflow_dispatch:
   schedule:
-    - cron: '17 * * * *'
+    - cron: '7,22,37,52 * * * *'
 permissions:
   contents: read
 concurrency:
@@ -13,7 +13,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     permissions:
       contents: write
     steps:
@@ -33,19 +33,29 @@ jobs:
         run: |
           mkdir -p dashboard/site
           if [ -f snapshot.json ]; then cp snapshot.json dashboard/site/data.json; fi
+          mkdir -p dashboard/runtime
+          if [ -d forecast-archive ]; then cp -R forecast-archive/. dashboard/runtime/; fi
       - name: Restore recent snapshot
         uses: actions/cache/restore@v4
         with:
-          path: dashboard/site/data.json
-          key: nba-injury-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: nba-injury-
+          path: |
+            dashboard/site/data.json
+            dashboard/site/predictions*.json
+            dashboard/runtime
+          key: nba-reference-v2-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: nba-reference-v2-
       - name: Fetch latest Beijing games and injury data
-        run: python dashboard/scripts/update.py
+        env:
+          NBA_AVAILABILITY_URL: ${{ vars.NBA_AVAILABILITY_URL }}
+        run: python dashboard/scripts/pipeline.py
       - name: Save recent snapshot
         uses: actions/cache/save@v4
         with:
-          path: dashboard/site/data.json
-          key: nba-injury-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            dashboard/site/data.json
+            dashboard/site/predictions*.json
+            dashboard/runtime
+          key: nba-reference-v2-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Persist daily snapshot and keep scheduled updates active
         continue-on-error: true
         env:
@@ -58,10 +68,22 @@ jobs:
             printf '%s\n' "$today" > last-snapshot-date.txt
             git config user.name 'github-actions[bot]'
             git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            git add snapshot.json last-snapshot-date.txt
+            mkdir -p forecast-archive
+            if [ -d dashboard/runtime/forecasts ]; then cp -R dashboard/runtime/forecasts forecast-archive/; fi
+            if [ -d dashboard/runtime/evaluations ]; then cp -R dashboard/runtime/evaluations forecast-archive/; fi
+            git add snapshot.json last-snapshot-date.txt forecast-archive
             git commit -m "Update daily injury snapshot for $today"
             git push origin HEAD:main
           fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: forecast-audit-${{ github.run_id }}
+          path: |
+            dashboard/runtime/forecasts
+            dashboard/runtime/evaluations
+            dashboard/runtime/health.json
+          retention-days: 90
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v4
         with:
